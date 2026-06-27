@@ -4,7 +4,7 @@ Willkommen zu meinem ersten GitHub-Projekt!
 
 ## Über dieses Projekt
 
-Dieses Projekt ist ein Beispeil für einen typischen GitHub-Workflow.
+Dieses Projekt ist ein Beispiel für einen typischen GitHub-Workflow.
 Es zeigt, wie man Änderungen macht, einen Branch erstellt und einen Pull Request öffnet.
 
 ## Schritte
