@@ -319,17 +319,33 @@ def make_sphere(name, center, radius, collection, segments=16, rings=8):
     return obj
 
 
-def footprint_radius(coords, center_xy, z_min=None, z_max=None):
+def footprint_radius(coords, center_xy, z_min=None, z_max=None, angle=None, angle_tol=None):
+    """Max radial distance from center_xy among coords within the given Z
+    slice. If `angle`/`angle_tol` are given, only vertices within that angular
+    wedge are considered first (falls back to the full slice if none match) -
+    this matters for non-circular footprints (e.g. an oval bowl), where the
+    true local radius at a seam can be much smaller than the model's overall
+    max radius in that Z slice."""
     cx, cy = center_xy
     best = 0.0
+    found = False
     for co in coords:
         if z_min is not None and co.z < z_min:
             continue
         if z_max is not None and co.z > z_max:
             continue
+        if angle is not None:
+            a = math.atan2(co.y - cy, co.x - cx)
+            diff = (a - angle + math.pi) % (2 * math.pi) - math.pi
+            if abs(diff) > angle_tol:
+                continue
         r = math.hypot(co.x - cx, co.y - cy)
         if r > best:
             best = r
+            found = True
+    if angle is not None and not found:
+        return footprint_radius(coords, center_xy, z_min=z_min, z_max=z_max)
+    return best
     return best
 
 
@@ -372,24 +388,31 @@ class MoldJacketSettings(PropertyGroup):
         subtype='DISTANCE', unit='LENGTH', default=0.0,
     )
 
+    # NOTE on min/max: these are hard bounds - Blender silently clamps any
+    # value assigned outside them (including via Python/scripting), with no
+    # warning. They are deliberately left very wide (not tied to any specific
+    # scene Unit Scale convention) so a value that is "correct" for a scene
+    # modeled at, say, 1 Blender unit = 1 mm never gets silently clamped down
+    # to something else. soft_min/soft_max just shape the slider UI for the
+    # common case (a small model at the default 1 unit = 1 m convention).
     gap_distance: FloatProperty(
         name="Silicone Gap",
         description="Distance between the master model surface and the inside of the jacket - this is where the silicone is poured (typically ~4mm)",
-        subtype='DISTANCE', unit='LENGTH', default=0.004, min=0.0002, max=0.05,
+        subtype='DISTANCE', unit='LENGTH', default=0.004, min=0.0, max=1000.0, soft_min=0.0002, soft_max=0.05,
     )
     wall_thickness: FloatProperty(
         name="Jacket Wall Thickness",
-        subtype='DISTANCE', unit='LENGTH', default=0.003, min=0.001, max=0.05,
+        subtype='DISTANCE', unit='LENGTH', default=0.003, min=0.0, max=1000.0, soft_min=0.001, soft_max=0.05,
     )
     voxel_size: FloatProperty(
         name="Detail (Voxel Size)",
         description="Resolution used to rebuild the offset surfaces. Smaller = more detail but slower",
-        subtype='DISTANCE', unit='LENGTH', default=0.0015, min=0.0003, max=0.01,
+        subtype='DISTANCE', unit='LENGTH', default=0.0015, min=0.0, max=1000.0, soft_min=0.0003, soft_max=0.01,
     )
     top_margin: FloatProperty(
         name="Top Collar Margin",
         description="Extra height the open jacket top extends above the tallest point of the master model",
-        subtype='DISTANCE', unit='LENGTH', default=0.008, min=0.0, max=0.1,
+        subtype='DISTANCE', unit='LENGTH', default=0.008, min=0.0, max=1000.0, soft_min=0.0, soft_max=0.1,
     )
 
     num_parts: IntProperty(
@@ -403,33 +426,33 @@ class MoldJacketSettings(PropertyGroup):
     )
 
     wings_per_seam: IntProperty(name="Wings per Seam", default=2, min=1, max=6)
-    wing_width: FloatProperty(name="Wing Width (outward)", subtype='DISTANCE', unit='LENGTH', default=0.02, min=0.002, max=0.1)
-    wing_span: FloatProperty(name="Wing Height", subtype='DISTANCE', unit='LENGTH', default=0.03, min=0.005, max=0.15)
-    wing_thickness: FloatProperty(name="Wing Thickness (per side)", subtype='DISTANCE', unit='LENGTH', default=0.004, min=0.001, max=0.02)
+    wing_width: FloatProperty(name="Wing Width (outward)", subtype='DISTANCE', unit='LENGTH', default=0.02, min=0.0, max=1000.0, soft_min=0.002, soft_max=0.1)
+    wing_span: FloatProperty(name="Wing Height", subtype='DISTANCE', unit='LENGTH', default=0.03, min=0.0, max=1000.0, soft_min=0.005, soft_max=0.15)
+    wing_thickness: FloatProperty(name="Wing Thickness (per side)", subtype='DISTANCE', unit='LENGTH', default=0.004, min=0.0, max=1000.0, soft_min=0.001, soft_max=0.02)
     wing_hole_diameter: FloatProperty(
         name="Wing Clamp Hole Diameter",
         description="Diameter of the hole through the wings for a bolt/clip/rubber band. 0 disables it",
-        subtype='DISTANCE', unit='LENGTH', default=0.005, min=0.0, max=0.02,
+        subtype='DISTANCE', unit='LENGTH', default=0.005, min=0.0, max=1000.0, soft_min=0.0, soft_max=0.02,
     )
 
     locks_per_seam: IntProperty(name="Locks per Seam", default=3, min=0, max=10)
-    lock_diameter: FloatProperty(name="Lock Ball Diameter", subtype='DISTANCE', unit='LENGTH', default=0.009, min=0.002, max=0.03)
-    lock_depth: FloatProperty(name="Lock Protrusion", subtype='DISTANCE', unit='LENGTH', default=0.005, min=0.001, max=0.02)
+    lock_diameter: FloatProperty(name="Lock Ball Diameter", subtype='DISTANCE', unit='LENGTH', default=0.009, min=0.0, max=1000.0, soft_min=0.002, soft_max=0.03)
+    lock_depth: FloatProperty(name="Lock Protrusion", subtype='DISTANCE', unit='LENGTH', default=0.005, min=0.0, max=1000.0, soft_min=0.001, soft_max=0.02)
     lock_clearance: FloatProperty(
         name="Lock Fit Clearance",
         description="Extra radius added to the socket (mama) side so the ball (papa) side fits without binding",
-        subtype='DISTANCE', unit='LENGTH', default=0.0003, min=0.0, max=0.002,
+        subtype='DISTANCE', unit='LENGTH', default=0.0003, min=0.0, max=1000.0, soft_min=0.0, soft_max=0.002,
     )
 
-    base_margin: FloatProperty(name="Base Plate Margin", subtype='DISTANCE', unit='LENGTH', default=0.008, min=0.0, max=0.1)
-    base_plate_thickness: FloatProperty(name="Base Plate Thickness", subtype='DISTANCE', unit='LENGTH', default=0.004, min=0.001, max=0.02)
-    step1_height: FloatProperty(name="Inner Step Height", subtype='DISTANCE', unit='LENGTH', default=0.003, min=0.0005, max=0.02)
-    step1_width: FloatProperty(name="Inner Step Width", subtype='DISTANCE', unit='LENGTH', default=0.006, min=0.001, max=0.05)
-    step2_height: FloatProperty(name="Outer Step Height", subtype='DISTANCE', unit='LENGTH', default=0.003, min=0.0005, max=0.02)
-    step2_width: FloatProperty(name="Outer Step Width", subtype='DISTANCE', unit='LENGTH', default=0.004, min=0.001, max=0.05)
+    base_margin: FloatProperty(name="Base Plate Margin", subtype='DISTANCE', unit='LENGTH', default=0.008, min=0.0, max=1000.0, soft_min=0.0, soft_max=0.1)
+    base_plate_thickness: FloatProperty(name="Base Plate Thickness", subtype='DISTANCE', unit='LENGTH', default=0.004, min=0.0, max=1000.0, soft_min=0.001, soft_max=0.02)
+    step1_height: FloatProperty(name="Inner Step Height", subtype='DISTANCE', unit='LENGTH', default=0.003, min=0.0, max=1000.0, soft_min=0.0005, soft_max=0.02)
+    step1_width: FloatProperty(name="Inner Step Width", subtype='DISTANCE', unit='LENGTH', default=0.006, min=0.0, max=1000.0, soft_min=0.001, soft_max=0.05)
+    step2_height: FloatProperty(name="Outer Step Height", subtype='DISTANCE', unit='LENGTH', default=0.003, min=0.0, max=1000.0, soft_min=0.0005, soft_max=0.02)
+    step2_width: FloatProperty(name="Outer Step Width", subtype='DISTANCE', unit='LENGTH', default=0.004, min=0.0, max=1000.0, soft_min=0.001, soft_max=0.05)
     pin_count: IntProperty(name="Alignment Pin Count", default=4, min=0, max=12)
-    pin_diameter: FloatProperty(name="Pin Diameter", subtype='DISTANCE', unit='LENGTH', default=0.004, min=0.001, max=0.02)
-    pin_height: FloatProperty(name="Pin Height", subtype='DISTANCE', unit='LENGTH', default=0.004, min=0.001, max=0.02)
+    pin_diameter: FloatProperty(name="Pin Diameter", subtype='DISTANCE', unit='LENGTH', default=0.004, min=0.0, max=1000.0, soft_min=0.001, soft_max=0.02)
+    pin_height: FloatProperty(name="Pin Height", subtype='DISTANCE', unit='LENGTH', default=0.004, min=0.0, max=1000.0, soft_min=0.001, soft_max=0.02)
 
 
 # ---------------------------------------------------------------------------
@@ -658,6 +681,32 @@ class MOLDJACKET_OT_generate_jacket(Operator):
         wall = settings.wall_thickness
         vsize = settings.voxel_size
 
+        # Safety clamp: a voxel size that is tiny relative to the model
+        # (e.g. because the scene's Unit Scale differs from what the panel
+        # defaults assume) makes the voxel remesh steps below allocate a
+        # pathologically fine grid - this can exhaust available memory
+        # rather than just being slow. Auto-coarsen and warn instead of
+        # risking a crash.
+        model_span = max(maxb[0] - minb[0], maxb[1] - minb[1], maxb[2] - minb[2])
+        min_safe_voxel = model_span / 200.0
+        if vsize < min_safe_voxel:
+            self.report(
+                {'WARNING'},
+                f"Detail (Voxel Size) {vsize:.5g} is too fine for this model's size "
+                f"({model_span:.4g} units) - auto-adjusted to {min_safe_voxel:.5g} to avoid "
+                f"excessive memory use. Check Scene Properties > Units if this looks wrong.",
+            )
+            vsize = min_safe_voxel
+
+        if gap < model_span / 2000.0 or wall < model_span / 2000.0:
+            self.report(
+                {'WARNING'},
+                "Silicone Gap / Wall Thickness look very small relative to this model's "
+                f"size ({model_span:.4g} units) - the result may be degenerate. This "
+                "usually means the scene's Unit Scale doesn't match what these fields "
+                "assume (see Scene Properties > Units).",
+            )
+
         self.report({'INFO'}, "Building offset cavity surface...")
         cavity = offset_filled_solid(master, gap, vsize, "Cavity_tmp", coll)
         self.report({'INFO'}, "Building offset wall surface...")
@@ -727,6 +776,7 @@ class MOLDJACKET_OT_generate_jacket(Operator):
                     local_r = footprint_radius(
                         coords, center_xy,
                         z_min=z_center - settings.wing_span, z_max=z_center + settings.wing_span,
+                        angle=boundary_angle, angle_tol=math.radians(20),
                     ) + gap + wall
                     part_obj = add_wing(
                         part_obj, coll, center_xy, boundary_angle, is_start,
@@ -739,12 +789,17 @@ class MOLDJACKET_OT_generate_jacket(Operator):
                     local_r = footprint_radius(
                         coords, center_xy,
                         z_min=z_center - 0.01, z_max=z_center + 0.01,
+                        angle=boundary_angle, angle_tol=math.radians(20),
                     ) + gap
                     part_obj = add_lock(
                         part_obj, coll, center_xy, boundary_angle, local_r, wall,
                         z_center, settings, is_male, f"{i}_{boundary_angle:.2f}_{k}",
                     )
-            recalc_normals(part_obj)
+            # Wings/locks add several more chained booleans on top of an
+            # already-cleaned jacket part; on thin-walled masters (e.g. a
+            # bowl rim thinner than the gap+wall offset) this can leave a
+            # few leftover degenerate faces. Final cleanup pass catches those.
+            clean_solid(part_obj, vsize)
             parts[i] = part_obj
 
         self.report({'INFO'}, f"Jacket generated: {n} parts in collection '{coll.name}'")
